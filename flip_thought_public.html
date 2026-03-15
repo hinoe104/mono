@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mono-Ghost - 刹那の断片器</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;500&display=swap');
+
+        :root {
+            --zen-bg: #f7f3f0;
+            --zen-ink: #2c2c2c;
+        }
+
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent; /* Remove tap highlight on iOS */
+        }
+
+        html, body {
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden; /* Lock the background completely */
+            position: fixed; /* Extra lock for iOS */
+            overscroll-behavior-y: none; /* Disable pull-to-refresh */
+        }
+
+        body {
+            background-color: var(--zen-bg);
+            background-image: url('data:image/svg+xml;utf8,<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><filter id="noise"><feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch"/></filter><rect width="100%" height="100%" filter="url(%23noise)" opacity="0.03"/></svg>');
+            color: var(--zen-ink);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center; /* Stable centered block */
+            font-family: 'Noto Serif JP', serif;
+            letter-spacing: 0.35em;
+            padding: 20px;
+        }
+
+        #stage-container {
+            position: relative;
+            width: 90%;
+            max-width: 800px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+            transition: border-color 0.8s ease;
+            margin-bottom: clamp(40px, 8vh, 80px);
+        }
+
+        #input-layer {
+            width: 100%;
+            background: transparent;
+            border: none;
+            outline: none;
+            color: var(--zen-ink);
+            font-size: clamp(1.1rem, 4.5vw, 1.5rem);
+            text-align: center;
+            font-family: inherit;
+            font-weight: 300;
+            z-index: 10;
+            padding: 10px;
+            margin: 0;
+            transition: opacity 0.6s ease, transform 0.6s ease;
+        }
+
+        #input-layer::placeholder {
+            color: rgba(44, 44, 44, 0.3);
+            font-weight: 300;
+        }
+
+        #input-layer:focus::placeholder {
+            opacity: 0;
+        }
+
+        #playback-layer {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 90%;
+            text-align: center;
+            font-size: clamp(1.1rem, 4.5vw, 1.5rem);
+            opacity: 0;
+            transition: opacity 0.5s ease;
+            pointer-events: none;
+        }
+
+        #skip-playback {
+            position: fixed;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: none;
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            color: #666;
+            padding: 12px 30px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.75rem;
+            letter-spacing: 3px;
+            transition: all 0.3s ease;
+            z-index: 50;
+            border-radius: 4px;
+        }
+
+        #skip-playback:hover {
+            background: rgba(0, 0, 0, 0.05);
+            color: var(--zen-ink);
+        }
+
+        #controls {
+            display: flex;
+            flex-wrap: nowrap;
+            gap: clamp(10px, 3vw, 30px);
+            justify-content: center;
+            opacity: 0.6;
+            transition: opacity 0.5s ease;
+            width: auto;
+        }
+
+        #controls:hover { opacity: 1; }
+
+        .ritual-btn {
+            background: transparent;
+            border: none;
+            color: #999;
+            padding: 10px 15px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: clamp(0.7rem, 2vw, 0.8rem);
+            letter-spacing: 3px;
+            transition: all 0.5s ease;
+            position: relative;
+            white-space: nowrap;
+        }
+
+        .ritual-btn::after {
+            content: "";
+            position: absolute;
+            bottom: 0; left: 50%; width: 0; height: 1px;
+            background: #ccc;
+            transition: all 0.5s ease;
+            transform: translateX(-50%);
+        }
+
+        .ritual-btn:hover { color: var(--zen-ink); }
+        .ritual-btn:hover::after { width: 100%; }
+
+        #counter {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            font-size: 0.6rem;
+            color: #bbb;
+            letter-spacing: 2px;
+            text-align: right;
+            line-height: 1.5;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255, 255, 255, 0.98);
+            display: none; /* JS will change to flex */
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start; /* Start from top for scroll */
+            z-index: 200;
+            backdrop-filter: blur(20px);
+            padding: 60px 20px;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .modal-inner {
+            width: 100%;
+            max-width: 600px;
+            text-align: center;
+            margin-bottom: 40px; /* Space for the bottom of the scroll */
+        }
+
+        .modal-inner::-webkit-scrollbar {
+            width: 4px;
+        }
+        .modal-inner::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .modal-inner::-webkit-scrollbar-thumb {
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+        }
+
+        #welcome-guide {
+            display: none;
+        }
+
+        #welcome-guide .guide-text {
+            font-size: clamp(0.8rem, 2.5vw, 1rem);
+            line-height: 2;
+            margin-bottom: 20px;
+            color: #555;
+        }
+
+        .guide-step {
+            margin: 10px 0;
+            opacity: 0.8;
+        }
+
+        #final-prose {
+            display: none;
+        }
+
+        #prose-content {
+            width: 100%;
+            height: clamp(300px, 50vh, 450px);
+            background: transparent;
+            color: #444;
+            border: none;
+            outline: none;
+            font-size: clamp(0.9rem, 3vw, 1.1rem);
+            line-height: 2.5;
+            resize: none;
+            text-align: center;
+            font-family: inherit;
+            overflow-y: auto;
+            scroll-behavior: smooth;
+        }
+
+        #prose-content::-webkit-scrollbar {
+            width: 4px;
+        }
+        #prose-content::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        #prose-content::-webkit-scrollbar-thumb {
+            background: rgba(0, 0, 0, 0.05);
+            border-radius: 10px;
+        }
+        #prose-content::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 0, 0, 0.1);
+        }
+
+        .close-btn {
+            margin-top: 30px;
+            color: #aaa;
+            cursor: pointer;
+            font-size: 0.7rem;
+            letter-spacing: 3px;
+            transition: color 0.3s ease;
+        }
+        .close-btn:hover { color: #333; }
+
+        .export-action-btn {
+            padding: 8px 15px;
+            background: transparent;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            color: var(--zen-ink);
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.75rem;
+            letter-spacing: 1px;
+            transition: all 0.3s ease;
+            border-radius: 4px;
+        }
+
+        .export-action-btn:hover {
+            background: rgba(0, 0, 0, 0.05);
+            border-color: rgba(0, 0, 0, 0.2);
+        }
+
+        .primary-btn {
+            margin-top: 20px;
+            padding: 10px 25px;
+            background: transparent;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            color: var(--zen-ink);
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.8rem;
+            letter-spacing: 3px;
+            transition: all 0.3s ease;
+        }
+
+        .primary-btn:hover {
+            background: rgba(0, 0, 0, 0.05);
+            border-color: rgba(0, 0, 0, 0.2);
+        }
+
+        @media (max-width: 600px) {
+            body {
+                letter-spacing: 0.25em;
+                padding: 15px;
+            }
+
+            #stage-container {
+                width: 100%;
+            }
+
+            #controls {
+                gap: 5px;
+                justify-content: space-between;
+                padding: 0 10px;
+            }
+
+            .ritual-btn {
+                letter-spacing: 2px;
+                padding: 10px 5px;
+            }
+
+            #counter {
+                bottom: 10px;
+                right: 15px;
+                font-size: 0.55rem;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="stage-container">
+        <input type="text" id="input-layer" placeholder="ここに思考を綴る" autocomplete="off">
+        <div id="playback-layer"></div>
+    </div>
+
+    <button id="skip-playback">スキップ</button>
+
+    <div id="controls">
+        <button id="btn-playback" class="ritual-btn" title="記録を1つずつ順番に表示します">振り返る</button>
+        <button id="btn-export" class="ritual-btn">書き出す</button>
+        <button id="btn-clear" class="ritual-btn">消し去る</button>
+    </div>
+
+    <div id="counter">綴った数: 0</div>
+
+    <!-- 初回説明 -->
+    <div id="welcome-guide" class="modal-overlay">
+        <div class="modal-inner">
+            <div class="guide-text">
+                <div class="guide-step" style="font-size: 1.1em; margin-bottom: 25px;">ふと浮かんだ言葉を記録し、<br>あとで振り返るツール</div>
+                <div class="guide-step">言葉を入力し、Enterを押す</div>
+                <div class="guide-step">入力した言葉は画面から移ろいますが<br>記憶されています</div>
+                <div class="guide-step">過去も未来も見えない<br>今、この一行だけ</div>
+                <div class="guide-step" style="margin-top: 25px; opacity: 0.5; font-size: 0.85em;">思考が移ろうように、時間が移ろうように<br>刹那を記録する、禅の断片器</div>
+            </div>
+            <button class="primary-btn" onclick="closeWelcome()">始める</button>
+        </div>
+    </div>
+
+    <!-- 書き出しモーダル -->
+    <div id="final-prose" class="modal-overlay">
+        <div class="modal-inner">
+            <textarea id="prose-content" readonly></textarea>
+            
+            <div id="export-actions" style="margin-top: 30px; display: flex; flex-wrap: wrap; gap: 15px; justify-content: center;">
+                <button class="export-action-btn" onclick="copyToClipboard()">📋 コピー</button>
+                <button class="export-action-btn" id="share-btn" onclick="shareText()" style="display: none;">📤 共有</button>
+                <button class="export-action-btn" id="download-btn" onclick="downloadText()" style="display: none;">💾 ダウンロード</button>
+            </div>
+            
+            <div class="close-btn" onclick="closeProse()">閉じる</div>
+        </div>
+    </div>
+
+    <script>
+        const input = document.getElementById('input-layer');
+        const playbackLayer = document.getElementById('playback-layer');
+        const stageContainer = document.getElementById('stage-container');
+        const counter = document.getElementById('counter');
+        const btnPlayback = document.getElementById('btn-playback');
+        const btnExport = document.getElementById('btn-export');
+        const btnClear = document.getElementById('btn-clear');
+        const finalProse = document.getElementById('final-prose');
+        const proseContent = document.getElementById('prose-content');
+        const welcomeGuide = document.getElementById('welcome-guide');
+        const skipBtn = document.getElementById('skip-playback');
+
+        let fragments = JSON.parse(localStorage.getItem('mono_ghost_fragments') || '[]');
+        let lastRecordTime = localStorage.getItem('mono_ghost_last_time') || null;
+        let isPlaying = false;
+        let shouldSkip = false;
+
+        // 初回起動チェック
+        if (!localStorage.getItem('mono_ghost_visited')) {
+            welcomeGuide.style.display = 'flex';
+            localStorage.setItem('mono_ghost_visited', 'true');
+        }
+
+        function closeWelcome() {
+            welcomeGuide.style.display = 'none';
+            input.focus();
+        }
+
+        function saveLocal() {
+            const now = new Date();
+            lastRecordTime = now.toISOString();
+            localStorage.setItem('mono_ghost_fragments', JSON.stringify(fragments));
+            localStorage.setItem('mono_ghost_last_time', lastRecordTime);
+            updateCounter();
+        }
+
+        function updateCounter() {
+            let counterText = `綴った数: ${fragments.length}`;
+            
+            if (lastRecordTime && fragments.length > 0) {
+                const lastTime = new Date(lastRecordTime);
+                const now = new Date();
+                const diffMs = now - lastTime;
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMs / 3600000);
+                const diffDays = Math.floor(diffMs / 86400000);
+                
+                let timeText;
+                if (diffMins < 1) {
+                    timeText = 'たった今';
+                } else if (diffMins < 60) {
+                    timeText = `${diffMins}分前`;
+                } else if (diffHours < 24) {
+                    timeText = `${diffHours}時間前`;
+                } else {
+                    timeText = `${diffDays}日前`;
+                }
+                
+                counterText += `<br>最後の記録: ${timeText}`;
+            }
+            
+            counter.innerHTML = counterText;
+        }
+
+        function closeProse() {
+            finalProse.style.display = 'none';
+        }
+
+        skipBtn.onclick = () => {
+            shouldSkip = true;
+        };
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && input.value.trim() !== "") {
+                const text = input.value.trim();
+                fragments.push(text);
+                
+                input.style.opacity = 0;
+                input.style.transform = "translateY(-5px)";
+                
+                setTimeout(() => {
+                    input.value = "";
+                    input.style.opacity = 1;
+                    input.style.transform = "translateY(0)";
+                    saveLocal();
+                }, 600);
+            }
+        });
+
+        updateCounter();
+
+        async function playback() {
+            if (fragments.length === 0) return;
+            
+            isPlaying = true;
+            shouldSkip = false;
+            skipBtn.style.display = 'block';
+            
+            input.style.opacity = 0;
+            setTimeout(() => input.style.display = "none", 500);
+            
+            await new Promise(r => setTimeout(r, 800));
+
+            for (const text of fragments) {
+                if (shouldSkip) break;
+                
+                playbackLayer.style.opacity = 0;
+                await new Promise(r => setTimeout(r, 500));
+                playbackLayer.textContent = text;
+                playbackLayer.style.opacity = 1;
+                const waitTime = Math.max(2000, text.length * 150);
+                
+                const startTime = Date.now();
+                while (Date.now() - startTime < waitTime && !shouldSkip) {
+                    await new Promise(r => setTimeout(r, 100));
+                }
+            }
+
+            playbackLayer.style.opacity = 0;
+            await new Promise(r => setTimeout(r, 1200));
+            playbackLayer.textContent = "";
+            input.style.display = "block";
+            setTimeout(() => input.style.opacity = 1, 50);
+            
+            skipBtn.style.display = 'none';
+            isPlaying = false;
+            shouldSkip = false;
+            input.focus();
+        }
+
+        btnPlayback.onclick = playback;
+
+        async function exportToPB() {
+            if (fragments.length === 0) {
+                proseContent.value = 'まだ何も綴られていません。\n\n言葉を入力してEnterを押すと、ここに記録されます。';
+                finalProse.style.display = 'flex';
+                document.getElementById('export-actions').style.display = 'none';
+                return;
+            }
+
+            const fullText = fragments.join('\n');
+            proseContent.value = fullText;
+            finalProse.style.display = 'flex';
+            document.getElementById('export-actions').style.display = 'flex';
+
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            const shareBtn = document.getElementById('share-btn');
+            const downloadBtn = document.getElementById('download-btn');
+
+            if (isMobile && navigator.share) {
+                shareBtn.style.display = 'inline-block';
+            }
+
+            if (!isMobile) {
+                downloadBtn.style.display = 'inline-block';
+            }
+        }
+
+        function copyToClipboard() {
+            const text = proseContent.value;
+            navigator.clipboard.writeText(text).then(() => {
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.textContent = '✓ コピー完了';
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                }, 2000);
+            }).catch(err => {
+                console.error('コピー失敗:', err);
+                proseContent.value = 'コピーできませんでした。\n\nテキストを長押しして手動でコピーしてください。\n\n---\n\n' + text;
+            });
+        }
+
+        async function shareText() {
+            const text = proseContent.value;
+            try {
+                await navigator.share({
+                    title: '刹那の断片',
+                    text: text
+                });
+            } catch (err) {
+                if (err.name !== 'AbortError') {
+                    console.error('共有失敗:', err);
+                }
+            }
+        }
+
+        function downloadText() {
+            const text = proseContent.value;
+            const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            const date = new Date().toISOString().split('T')[0];
+            a.href = url;
+            a.download = `mono-ghost_${date}.txt`;
+            a.click();
+            URL.revokeObjectURL(url);
+            
+            const btn = event.target;
+            const originalText = btn.textContent;
+            btn.textContent = '✓ 保存完了';
+            setTimeout(() => {
+                btn.textContent = originalText;
+            }, 2000);
+        }
+
+        btnExport.onclick = exportToPB;
+
+        btnClear.onclick = () => {
+            if (fragments.length === 0) {
+                return;
+            }
+            
+            if (confirm("全ての記憶を消去します。\n\n念のため「書き出す」で保存してからの消去をおすすめします。\n\n本当に消去しますか？")) {
+                fragments = [];
+                lastRecordTime = null;
+                localStorage.removeItem('mono_ghost_fragments');
+                localStorage.removeItem('mono_ghost_last_time');
+                updateCounter();
+                input.value = "";
+                input.focus();
+            }
+        };
+
+        // 開発用：Ctrl+Shift+Rで初回説明を再表示
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.shiftKey && e.key === 'R') {
+                e.preventDefault();
+                localStorage.removeItem('mono_ghost_visited');
+                welcomeGuide.style.display = 'flex';
+            }
+        });
+
+        input.focus();
+    </script>
+</body>
+</html>
